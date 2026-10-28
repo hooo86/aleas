@@ -14,6 +14,7 @@ function Login({ onDone }: { onDone: () => void }) {
   };
   return (
     <form className="card narrow" onSubmit={submit}>
+      <img src="/logo.svg" alt="Badgeo" height={40} />
       <h1>Connexion</h1>
       <input name="u" placeholder="Utilisateur" required />
       <input name="p" type="password" placeholder="Mot de passe" required />
@@ -43,6 +44,7 @@ function Devices() {
 
   return (
     <main>
+      <img src="/logo.svg" alt="Badgeo" height={40} />
       <h1>Pointeuses</h1>
       <form className="card grid" onSubmit={add}>
         <input name="name" placeholder="Nom" required />
