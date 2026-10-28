@@ -39,3 +39,18 @@ class SyncTests(TestCase):
         self.dev.refresh_from_db()
         self.assertEqual((self.dev.status, self.dev.consecutive_failures, self.dev.events_total), ("disconnected", 1, 1))
         self.assertEqual(PunchEvent.objects.count(), 1)
+
+
+class ApiTests(TestCase):
+    def setUp(self):
+        from django.contrib.auth.models import User
+        from rest_framework.authtoken.models import Token
+        self.tok = Token.objects.create(user=User.objects.create_user("u", password="p")).key
+
+    def test_requires_auth_and_creates(self):
+        self.assertEqual(self.client.get("/api/devices/").status_code, 401)
+        h = {"HTTP_AUTHORIZATION": f"Token {self.tok}"}
+        r = self.client.post("/api/devices/", {"name": "X", "vendor": "zkteco", "ip_address": "10.0.0.9", "port": 4370},
+                             content_type="application/json", **h)
+        self.assertEqual(r.status_code, 201)
+        self.assertNotIn("comm_key", r.json())
