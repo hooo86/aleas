@@ -53,7 +53,7 @@ docs/  deploy/ (backup.sh, restore.sh, nginx.conf)  docker-compose.yml
 | Phase | Contenu | État |
 |---|---|---|
 | 1 | Analyse protocoles | Fait (voie socket ZK documentée ; UNIS à confirmer) |
-| 2 | Base de données, auth, rôles, audit, chiffrement des secrets | À faire (auth par jeton seulement) |
+| 2 | Base de données, auth, rôles, audit, chiffrement des secrets | Fait (voir README) ; restent : MFA, expiration/rotation des jetons, UI de gestion des utilisateurs |
 | 3 | Appareils, test IP, synchro idempotente, reprise | Prototype fait, non testé sur appareil réel ; incrémental, ADMS, doublons logiques à faire |
 | 4 | Personnel, structures, horaires, import/export | À faire |
 | 5 | Moteur de présence | À faire |

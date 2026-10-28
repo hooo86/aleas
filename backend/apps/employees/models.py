@@ -8,8 +8,10 @@ class Employee(models.Model):
     matricule = models.CharField(max_length=32, unique=True)
     first_name = models.CharField(max_length=100)
     last_name = models.CharField(max_length=100)
-    department = models.CharField(max_length=100, blank=True)
-    active = models.BooleanField(default=True)
+    org_unit = models.ForeignKey("orgs.OrgUnit", null=True, blank=True, on_delete=models.PROTECT, related_name="employees")
+    job_title = models.CharField(max_length=150, blank=True)
+    hire_date = models.DateField(null=True, blank=True)
+    status = models.CharField(max_length=10, default="active", choices=[("active", "Actif"), ("suspended", "Suspendu"), ("left", "Sorti")])
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

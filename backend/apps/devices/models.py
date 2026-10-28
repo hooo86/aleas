@@ -2,6 +2,8 @@ import uuid
 
 from django.db import models
 
+from apps.core.crypto import decrypt, encrypt
+
 
 class Device(models.Model):
     class Vendor(models.TextChoices):
@@ -26,7 +28,8 @@ class Device(models.Model):
     port = models.PositiveIntegerField(default=4370)
     serial_number = models.CharField(max_length=64, blank=True)
     protocol = models.CharField(max_length=16, choices=Protocol.choices, default=Protocol.ZK_TCP)
-    comm_key = models.PositiveIntegerField(default=0, help_text="Device communication password (0 = none)")
+    comm_key_enc = models.TextField(blank=True, editable=False, help_text="Encrypted communication key")
+    timezone = models.CharField(max_length=64, default="Africa/Algiers", help_text="Fuseau de l'horloge de l'appareil")
     enabled = models.BooleanField(default=True)
 
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.UNKNOWN)
@@ -41,6 +44,15 @@ class Device(models.Model):
     class Meta:
         ordering = ["name"]
         constraints = [models.UniqueConstraint(fields=["ip_address", "port"], name="uniq_device_endpoint")]
+
+    @property
+    def comm_key(self) -> int:
+        v = decrypt(self.comm_key_enc)
+        return int(v) if v else 0
+
+    @comm_key.setter
+    def comm_key(self, value):
+        self.comm_key_enc = encrypt(str(value)) if value else ""
 
     def __str__(self):
         return self.name

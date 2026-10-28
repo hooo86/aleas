@@ -6,3 +6,4 @@ redis>=5.0
 psycopg2-binary>=2.9
 gunicorn>=22
 pyzk>=0.9
+cryptography>=43
