@@ -15,17 +15,19 @@ modifient un lot tant qu'ils ne sont pas tranchés.
 
 ### 1.1 Organisation et périmètre d'accès
 - Hiérarchie : **DG → DR (DRC, DRE, DRO, DRSE, DRSO) → Unité → Antenne**. Le formulaire actuel
-  contient déjà le niveau Antenne (ex. Unité BEJAIA → antennes SETIF, JIJEL) **[à confirmer :
-  existe-t-il une OU par antenne dans l'AD ?]**.
-- Chaque entité possède une OU correspondante dans l'AD. La table `org_unit` de l'application
-  porte le DN de son OU (`ad_dn`) et son `objectGUID`. La hiérarchie est **synchronisée depuis
-  l'AD**, et non plus codée en dur dans le JavaScript comme aujourd'hui.
+  contient déjà le niveau Antenne (ex. Unité BEJAIA → antennes SETIF, JIJEL).
+- La hiérarchie est **gérée dans l'application** (table `org_unit`, écran d'administration),
+  et non plus codée en dur dans le JavaScript comme aujourd'hui. Elle ne dépend pas des unités
+  d'organisation (OU) de l'Active Directory.
+- **Les OU de l'AD servent uniquement à l'importation des utilisateurs** : chaque entité peut
+  porter, à titre facultatif, le DN de l'OU correspondante (`ad_dn`). Lors d'un import, l'OU du
+  compte AD sert à **proposer** l'entité de l'utilisateur ; l'administrateur confirme ou
+  corrige. Ensuite, l'entité est une donnée de l'application : elle n'est jamais recalculée
+  depuis l'AD (ni à la connexion, ni par synchronisation) et ne change que par une action d'un
+  administrateur, tracée dans l'audit.
 - **Règle d'accès** : un utilisateur voit et manipule uniquement les données de son entité
   **et de ses entités descendantes**. Un agent de la DG voit tout ; un agent de la DRE voit la
   DRE, ses unités et leurs antennes ; un agent d'une unité ne voit ni l'unité voisine ni sa DR.
-- L'entité d'un utilisateur est déduite de l'OU qui contient son compte AD (résolue à chaque
-  connexion et par synchronisation planifiée). Un administrateur peut la surcharger
-  explicitement (cas d'un compte AD mal rangé), avec trace dans l'audit.
 - Le filtrage se fait **côté serveur** sur chaque requête (liste, détail, carte, export,
   rapport, chatbot), jamais seulement dans l'interface.
 
@@ -35,8 +37,8 @@ modifient un lot tant qu'ils ne sont pas tranchés.
 - Chaque utilisateur interne est **lié à un compte AD** (`sAMAccountName`/UPN + `objectGUID`
   pour survivre aux renommages). Il s'authentifie avec son mot de passe AD, vérifié par
   **bind LDAPS (port 636)** ; l'application ne stocke jamais ce mot de passe.
-- Compte AD désactivé, expiré ou verrouillé ⇒ connexion refusée et compte local suspendu à
-  la synchronisation suivante.
+- Compte AD désactivé, expiré ou verrouillé ⇒ le bind échoue et la connexion est refusée.
+  L'AD n'intervient pas dans les droits ni dans l'entité de l'utilisateur.
 - Les **clients** (Espace Client Étude, Espace Client Aléas) ne sont pas dans l'AD : comptes
   locaux à mot de passe haché (Argon2/PBKDF2), activation par lien e-mail, MFA recommandée.
 - Limitation des tentatives, journalisation des connexions, sessions sécurisées, HTTPS
@@ -107,8 +109,9 @@ sauvegardes régulières (base + photos/documents), historique des versions des 
   les synchronisations AD/Odoo, la génération de rapports et l'indexation documentaire.
   Ce dépôt contient déjà un socle réutilisable : arborescence `OrgUnit` avec descendants,
   rôles et périmètres, journal d'audit immuable, limitation des tentatives de connexion.
-- **Annuaire** : `ldap3` (bind LDAPS, recherche par `objectGUID`), compte de service AD en
-  lecture seule pour la synchronisation des OU et des comptes.
+- **Annuaire** : `ldap3` ; bind LDAPS pour vérifier le mot de passe à la connexion ; compte
+  de service AD en lecture seule utilisé **uniquement à l'importation** (recherche des
+  comptes, lecture de leur OU pour proposer l'entité).
 - **Odoo** : client XML-RPC/JSON-RPC isolé dans un module `integrations/odoo`.
 - **Frontend** : React + TypeScript, OpenLayers pour la carte, formulaires dynamiques par
   type d'aléa, interface en français (arabe prévu).
@@ -120,9 +123,10 @@ sauvegardes régulières (base + photos/documents), historique des versions des 
 
 Modèle de données principal :
 ```
-org_unit(id, parent_id, kind[DG|DR|UNITE|ANTENNE], code, name, path, ad_dn, ad_guid, active)
-user(id, username, kind[INTERNE|CLIENT], ad_guid, ad_upn, org_unit_id, org_unit_override,
-     matricule, role, active, last_ad_sync)
+org_unit(id, parent_id, kind[DG|DR|UNITE|ANTENNE], code, name, path, active,
+         ad_dn NULL)                                -- ad_dn : correspondance pour l'import seulement
+user(id, username, kind[INTERNE|CLIENT], ad_guid, ad_upn, org_unit_id, matricule, role,
+     active, imported_at, imported_by)
 project(id, odoo_id UNIQUE, code, name, partner_odoo_id, org_unit_id, state, dates, synced_at)
 client_account(user_id, partner_odoo_id)            -- Espace Client Étude
 client_zone(user_id, geom)                          -- Espace Client Aléas
@@ -144,29 +148,34 @@ Les lots 1 et 2 peuvent avancer en parallèle après le Lot 0.
 ### Lot 0 – Cadrage, accès et environnement (≈ 5 j/h)
 - Ateliers : valider la hiérarchie (antennes incluses), les rôles, la règle projet → entité,
   les champs de l'aléa Inondation, les unités de mesure.
-- Obtenir : domaine AD, contrôleurs, certificat LDAPS, base DN des OU LNHC, compte de service
-  en lecture ; URL Odoo, version, base, compte technique en lecture, champs utilisés.
+- Obtenir : domaine AD, contrôleurs, certificat LDAPS, base DN de recherche des comptes LNHC,
+  compte de service en lecture (pour l'import) ; URL Odoo, version, base, compte technique en lecture, champs utilisés.
 - Export de la base actuelle (formulaire Laravel) et des couches QGIS sources.
 - Environnements dev/recette/prod (Docker), CI (tests + lint), dépôt dédié **[à confirmer :
   ce dépôt contient aujourd'hui l'application de pointage ; MAKHATIR doit-il vivre dans un
   dépôt séparé ?]**.
 - **Livrables** : spécification validée, matrice des droits, accès techniques testés.
 
-### Lot 1 – Socle sécurité : AD, utilisateurs, hiérarchie, périmètre (≈ 15 j/h)
-- Synchronisation des OU AD → `org_unit` (création, renommage, déplacement, désactivation),
-  planifiée et déclenchable à la main, avec rapport d'écarts.
-- Base utilisateurs : création d'un utilisateur interne par recherche dans l'AD (liaison par
-  `objectGUID`), rôle applicatif, surcharge d'entité optionnelle.
+### Lot 1 – Socle sécurité : hiérarchie, utilisateurs, connexion AD, périmètre (≈ 13 j/h)
+- Gestion de la hiérarchie dans l'application : écran d'administration des entités
+  (création, renommage, déplacement, désactivation), chargement initial DG/DR/unités/antennes
+  depuis la liste officielle, correspondance facultative entité ↔ OU AD pour l'import.
+- **Import des utilisateurs depuis l'AD** : recherche (nom, matricule, UPN) ou import en lot
+  d'une OU ; l'entité est proposée d'après l'OU du compte via la correspondance, puis
+  confirmée ou corrigée par l'administrateur ; rôle applicatif choisi à l'import ; liaison
+  par `objectGUID` ; rapport d'import (créés, ignorés, OU sans correspondance).
+- Après l'import, l'entité et le rôle se gèrent uniquement dans l'application ; aucune
+  synchronisation des OU, aucune mise à jour de l'entité à la connexion.
 - Connexion interne par bind LDAPS ; connexion client par mot de passe local.
 - Refus si : utilisateur absent ou inactif localement, compte AD désactivé/expiré/verrouillé.
-- Mise à jour de l'entité à chaque connexion à partir du DN du compte.
 - Filtrage « entité + descendants » appliqué par un mécanisme unique à toute l'API.
 - Rôles proposés : administrateur, validateur, agent de saisie, consultation (internes) ;
   client étude, client aléas.
 - Audit des connexions et des changements de droits ; HTTPS, cookies sécurisés.
 - **Critères d'acceptation** : un agent d'unité ne peut lire, par aucune URL, une donnée d'une
   unité voisine ou de sa DR (tests automatisés sur chaque point d'accès) ; un compte AD
-  désactivé ne se connecte plus ; un compte AD valide mais absent de la base est refusé.
+  désactivé ne se connecte plus ; un compte AD valide mais absent de la base est refusé ;
+  déplacer un compte d'OU dans l'AD ne change ni l'entité ni les droits de l'utilisateur.
 
 ### Lot 2 – Intégration Odoo (≈ 8 j/h)
 - Connecteur Odoo (authentification, lecture paginée de `project.project` et `res.partner`).
@@ -233,7 +242,7 @@ Les lots 1 et 2 peuvent avancer en parallèle après le Lot 0.
 
 ### Lot 8 – Reprise de l'existant et mise en production (≈ 8 j/h)
 - Migration des aléas et photos de l'application actuelle (conversion des coordonnées,
-  correspondance des codes DRS/unité/antenne avec les OU, contrôle des doublons) avec rapport
+  correspondance des codes DRS/unité/antenne avec les entités, contrôle des doublons) avec rapport
   de reprise.
 - Reverse proxy TLS, sauvegardes automatiques base + fichiers avec test de restauration,
   supervision (Zabbix déjà en place), journalisation centralisée.
@@ -241,7 +250,7 @@ Les lots 1 et 2 peuvent avancer en parallèle après le Lot 0.
 - **Critères** : restauration complète testée ; 100 % des fiches reprises ou listées en
   anomalie.
 
-**Total Phase 1 (lots 0 à 8) : ≈ 89 j/h.**
+**Total Phase 1 (lots 0 à 8) : ≈ 87 j/h.**
 
 ### Phase 2 – Enrichissement de la base géotechnique (lots 9 à 11, ≈ 45 j/h)
 - **Lot 9** – Sondages et lithologie : sondages géoréférencés liés aux projets, logs
@@ -276,7 +285,8 @@ Les lots 1 et 2 peuvent avancer en parallèle après le Lot 0.
 
 ## 4. Décisions à obtenir avant le démarrage
 
-1. Niveau Antenne présent dans l'AD ? Liste officielle des OU et de leurs codes.
+1. Liste officielle des entités (DG, DR, unités, antennes) et de leurs codes ; correspondance
+   de chaque entité avec son OU AD pour l'import.
 2. Règle de rattachement d'un projet Odoo à une entité ; version d'Odoo et mode d'accès API.
 3. Rôles et matrice des droits (qui valide, qui crée les comptes clients).
 4. Champs de l'aléa Inondation ; unités chlorures/sulfates ; listes de valeurs définitives.
