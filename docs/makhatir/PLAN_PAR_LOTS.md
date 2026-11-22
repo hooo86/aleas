@@ -3,7 +3,7 @@
 Sources : fiche technique « MAKHATIR MAP » (plateforme + chatbot), formulaire actuel
 `makhatir.lnhc.dz/formm`, capture de la carte `carte_interactive_aléas`, et les exigences
 ajoutées : projets lus dans **Odoo**, comptes utilisateurs **liés à Active Directory**,
-périmètre d'accès calqué sur la **hiérarchie des unités d'organisation (OU)**.
+périmètre d'accès selon la **hiérarchie des entités gérée dans l'application** (OU de l'AD utilisées seulement à l'import des utilisateurs).
 
 Les charges sont des **estimations** en jours-homme (j/h) pour un développeur confirmé ;
 elles sont à réviser après le Lot 0. Les points marqués **[à confirmer]** bloquent ou
