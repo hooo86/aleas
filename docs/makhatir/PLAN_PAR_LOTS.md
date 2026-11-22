@@ -2,12 +2,18 @@
 
 Sources : fiche technique « MAKHATIR MAP » (plateforme + chatbot), formulaire actuel
 `makhatir.lnhc.dz/formm`, capture de la carte `carte_interactive_aléas`, et les exigences
-ajoutées : projets lus dans **Odoo**, comptes utilisateurs **liés à Active Directory**,
-périmètre d'accès selon la **hiérarchie des entités gérée dans l'application** (OU de l'AD utilisées seulement à l'import des utilisateurs).
+ajoutées :
+- projets lus dans **Odoo**, rattachés à une **unité opérationnelle** (module *Operating Unit*) ;
+- chaque entité MAKHATIR liée à une unité opérationnelle Odoo, **avec la même hiérarchie** ;
+- comptes utilisateurs **liés à Active Directory** (OU de l'AD utilisées seulement à l'import) ;
+- **portail client séparé** de l'application principale, développé **en dernier**.
 
 Les charges sont des **estimations** en jours-homme (j/h) pour un développeur confirmé ;
 elles sont à réviser après le Lot 0. Les points marqués **[à confirmer]** bloquent ou
 modifient un lot tant qu'ils ne sont pas tranchés.
+
+Vocabulaire : « **entité** » = un nœud de la hiérarchie LNHC dans MAKHATIR (DG, DR, unité,
+antenne) ; « **unité opérationnelle** » = l'enregistrement Odoo `operating.unit`.
 
 ---
 
@@ -17,50 +23,60 @@ modifient un lot tant qu'ils ne sont pas tranchés.
 - Hiérarchie : **DG → DR (DRC, DRE, DRO, DRSE, DRSO) → Unité → Antenne**. Le formulaire actuel
   contient déjà le niveau Antenne (ex. Unité BEJAIA → antennes SETIF, JIJEL).
 - La hiérarchie est **gérée dans l'application** (table `org_unit`, écran d'administration),
-  et non plus codée en dur dans le JavaScript comme aujourd'hui. Elle ne dépend pas des unités
-  d'organisation (OU) de l'Active Directory.
+  et non plus codée en dur dans le JavaScript comme aujourd'hui.
+- **Chaque entité est liée à une et une seule unité opérationnelle Odoo**, et une unité
+  opérationnelle n'est liée qu'à une seule entité (liaison 1-1 par l'identifiant Odoo).
+  Les deux arborescences doivent être identiques : le parent d'une entité est lié au parent
+  de son unité opérationnelle. Toute divergence (unité opérationnelle sans entité, entité sans
+  unité opérationnelle, parent différent) est signalée dans un rapport de cohérence à chaque
+  synchronisation et bloque l'activation de l'entité concernée.
 - **Les OU de l'AD servent uniquement à l'importation des utilisateurs** : chaque entité peut
   porter, à titre facultatif, le DN de l'OU correspondante (`ad_dn`). Lors d'un import, l'OU du
   compte AD sert à **proposer** l'entité de l'utilisateur ; l'administrateur confirme ou
   corrige. Ensuite, l'entité est une donnée de l'application : elle n'est jamais recalculée
-  depuis l'AD (ni à la connexion, ni par synchronisation) et ne change que par une action d'un
-  administrateur, tracée dans l'audit.
+  depuis l'AD et ne change que par une action d'un administrateur, tracée dans l'audit.
 - **Règle d'accès** : un utilisateur voit et manipule uniquement les données de son entité
   **et de ses entités descendantes**. Un agent de la DG voit tout ; un agent de la DRE voit la
   DRE, ses unités et leurs antennes ; un agent d'une unité ne voit ni l'unité voisine ni sa DR.
 - Le filtrage se fait **côté serveur** sur chaque requête (liste, détail, carte, export,
   rapport, chatbot), jamais seulement dans l'interface.
 
-### 1.2 Authentification
+### 1.2 Authentification (application principale)
+- L'application principale est **réservée aux agents LNHC** ; elle n'a pas de comptes clients.
 - Une **base d'utilisateurs locale** est la référence : seul un utilisateur présent et actif
   dans cette base peut se connecter, même s'il possède un compte AD valide.
-- Chaque utilisateur interne est **lié à un compte AD** (`sAMAccountName`/UPN + `objectGUID`
-  pour survivre aux renommages). Il s'authentifie avec son mot de passe AD, vérifié par
+- Chaque utilisateur est **lié à un compte AD** (`sAMAccountName`/UPN + `objectGUID` pour
+  survivre aux renommages). Il s'authentifie avec son mot de passe AD, vérifié par
   **bind LDAPS (port 636)** ; l'application ne stocke jamais ce mot de passe.
 - Compte AD désactivé, expiré ou verrouillé ⇒ le bind échoue et la connexion est refusée.
   L'AD n'intervient pas dans les droits ni dans l'entité de l'utilisateur.
-- Les **clients** (Espace Client Étude, Espace Client Aléas) ne sont pas dans l'AD : comptes
-  locaux à mot de passe haché (Argon2/PBKDF2), activation par lien e-mail, MFA recommandée.
 - Limitation des tentatives, journalisation des connexions, sessions sécurisées, HTTPS
   obligatoire (le site actuel est servi en HTTP : « Non sécurisé »).
 
-### 1.3 Projets Odoo
-- La liste des projets (études) vient d'Odoo (modèle `project.project`), lue via l'API
-  XML-RPC/JSON-RPC avec un **compte technique en lecture seule**.
-- Données récupérées : identifiant Odoo, code, intitulé, client (`res.partner`), entité
-  responsable, état/étape, dates, localisation si disponible.
+### 1.3 Projets Odoo et unités opérationnelles
+- Odoo utilise le module *Operating Unit* : modèle `operating.unit`, et sur les projets le
+  champ `operating_unit_id` (module `project_operating_unit`) **[à confirmer : version d'Odoo
+  et modules installés]**.
+- Lecture via l'API XML-RPC/JSON-RPC avec un **compte technique en lecture seule**, autorisé
+  sur toutes les unités opérationnelles.
+- **Unités opérationnelles** : identifiant, code, nom, société, parent. Le module OCA standard
+  ne prévoit pas de parent sur `operating.unit` : la hiérarchie dans Odoo repose donc
+  probablement sur un champ ajouté par le LNHC **[à confirmer : nom du champ parent]**.
+- **Projets** (`project.project`) : identifiant, code, intitulé, client (`res.partner`),
+  `operating_unit_id`, étape/état, dates, localisation si disponible.
+- **Rattachement projet → entité** : l'entité d'un projet est celle liée à son unité
+  opérationnelle. Le périmètre des projets suit donc la même règle que le reste
+  (entité + descendantes). Un projet sans unité opérationnelle, ou dont l'unité n'est liée à
+  aucune entité, n'est visible que des administrateurs, dans une liste d'anomalies.
 - Copie locale synchronisée (planifiée + à la demande), pour que l'application reste
   utilisable si Odoo est indisponible et pour pouvoir filtrer par périmètre.
-- **Correspondance projet → entité [à confirmer]** : société Odoo, compte analytique,
-  département, ou champ personnalisé (`x_unite`). Sans cette règle, le périmètre des
-  projets ne peut pas être appliqué.
-- Un aléa peut être rattaché à un projet Odoo (optionnel : un aléa peut être relevé hors
-  étude). Le client Odoo du projet détermine l'accès de l'Espace Client Étude.
+- Un aléa peut être rattaché à un projet (optionnel : un aléa peut être relevé hors étude).
+  Le projet proposé à la saisie doit appartenir au périmètre de l'agent.
 
 ### 1.4 Aléas (Phase 1 de la fiche technique)
-Fiche site commune : entité (DR/unité/antenne, déduite de l'utilisateur), matricule agent
-(déduit du compte), projet Odoo (optionnel), wilaya, commune, localité/lieu-dit,
-coordonnées (point, et polygone de zone en option), date de visite, photo globale.
+Fiche site commune : entité (déduite de l'utilisateur), matricule agent (déduit du compte),
+projet Odoo (optionnel), wilaya, commune, localité/lieu-dit, coordonnées (point, et polygone
+de zone en option), date de visite, photo globale.
 
 Un site porte **au moins un aléa**, chacun avec ses champs propres (repris du formulaire) :
 
@@ -96,23 +112,46 @@ clic avec photos et rapports associés selon les droits ; filtres (type, entité
 statut de validation). Les couches sont aujourd'hui des fichiers JS générés par qgis2web :
 elles passent en base PostGIS et sont servies en tuiles vectorielles ou GeoJSON filtrés.
 
-### 1.6 Espaces, sécurité, traçabilité
-Espace interne LNHC, Espace Client Étude, Espace Client Aléas (fiche technique §4).
-Séparation stricte des données clients, audit de toute saisie/modification/validation,
-sauvegardes régulières (base + photos/documents), historique des versions des rapports.
+### 1.6 Portail client (séparé, en dernier)
+- **Application distincte** de l'application principale : code, déploiement, base de données
+  et comptes séparés. Elle seule est exposée sur Internet ; l'application principale reste
+  sur le réseau interne du LNHC.
+- Le portail ne lit **jamais** la base interne. L'application principale lui **publie** dans
+  un seul sens les données validées et autorisées (fiches d'aléas publiées, rapports,
+  avancement des projets), par une API de publication authentifiée ou une file de messages.
+  Une compromission du portail n'expose donc que ce qui a été publié.
+- Deux espaces (fiche technique §4) : **Client Étude** (comptes liés au partenaire Odoo du
+  projet : ses projets, leur avancement, ses données et son rapport) et **Client Aléas**
+  (carte et rapport des aléas de la zone attribuée).
+- Comptes clients locaux au portail : mot de passe haché (Argon2), activation par e-mail,
+  MFA recommandée ; création ou invitation déclenchée par un agent depuis l'application
+  principale.
+
+### 1.7 Sécurité et traçabilité
+Audit de toute saisie, modification et validation ; sauvegardes régulières (base +
+photos/documents) avec tests de restauration ; historique des versions des rapports ;
+séparation stricte des données clients dans le portail.
 
 ---
 
 ## 2. Architecture cible
 
-- **Backend** : Django + Django REST Framework + **GeoDjango / PostGIS** ; Celery + Redis pour
-  les synchronisations AD/Odoo, la génération de rapports et l'indexation documentaire.
-  Ce dépôt contient déjà un socle réutilisable : arborescence `OrgUnit` avec descendants,
-  rôles et périmètres, journal d'audit immuable, limitation des tentatives de connexion.
+```
+            Réseau interne LNHC                         │  DMZ / Internet
+                                                        │
+ AD (LDAPS) ──► Application principale MAKHATIR ──publication──► Portail client
+ Odoo (API) ──►  Django + PostGIS + Celery       (sens unique)   (app + base séparées)
+                 React / OpenLayers                     │
+```
+
+- **Application principale** : Django + Django REST Framework + **GeoDjango / PostGIS** ;
+  Celery + Redis pour la synchronisation Odoo, la génération des rapports et l'indexation
+  documentaire. Ce dépôt contient déjà un socle réutilisable : arborescence `OrgUnit` avec
+  descendants, rôles et périmètres, journal d'audit immuable, limitation des tentatives.
 - **Annuaire** : `ldap3` ; bind LDAPS pour vérifier le mot de passe à la connexion ; compte
-  de service AD en lecture seule utilisé **uniquement à l'importation** (recherche des
-  comptes, lecture de leur OU pour proposer l'entité).
-- **Odoo** : client XML-RPC/JSON-RPC isolé dans un module `integrations/odoo`.
+  de service AD en lecture seule utilisé **uniquement à l'importation** des utilisateurs.
+- **Odoo** : client XML-RPC/JSON-RPC isolé dans un module `integrations/odoo` (unités
+  opérationnelles, projets, partenaires).
 - **Frontend** : React + TypeScript, OpenLayers pour la carte, formulaires dynamiques par
   type d'aléa, interface en français (arabe prévu).
 - **Stockage fichiers** : stockage objet (MinIO/S3) ou volume dédié, accès aux photos et
@@ -120,20 +159,24 @@ sauvegardes régulières (base + photos/documents), historique des versions des 
 - **Périmètre** : hiérarchie stockée en chemin matérialisé (`ltree` ou `path` texte indexé)
   pour filtrer « entité + descendants » en une requête ; un `ScopedQuerysetMixin` unique
   appliqué à tous les points d'accès.
+- **Portail client** : application et base séparées, même pile technique pour mutualiser les
+  composants (carte, symboles), déployée en DMZ.
 
-Modèle de données principal :
+Modèle de données de l'application principale :
 ```
 org_unit(id, parent_id, kind[DG|DR|UNITE|ANTENNE], code, name, path, active,
-         ad_dn NULL)                                -- ad_dn : correspondance pour l'import seulement
-user(id, username, kind[INTERNE|CLIENT], ad_guid, ad_upn, org_unit_id, matricule, role,
-     active, imported_at, imported_by)
-project(id, odoo_id UNIQUE, code, name, partner_odoo_id, org_unit_id, state, dates, synced_at)
-client_account(user_id, partner_odoo_id)            -- Espace Client Étude
-client_zone(user_id, geom)                          -- Espace Client Aléas
+         odoo_operating_unit_id UNIQUE NOT NULL,   -- liaison 1-1 avec Odoo
+         ad_dn NULL)                               -- correspondance pour l'import AD seulement
+odoo_operating_unit(odoo_id, code, name, parent_odoo_id, company, synced_at)   -- copie Odoo
+user(id, username, ad_guid, ad_upn, org_unit_id, matricule, role, active,
+     imported_at, imported_by)
+project(id, odoo_id UNIQUE, code, name, partner_odoo_id, operating_unit_odoo_id,
+        org_unit_id (déduit), stage, dates, synced_at)
 site(id, org_unit_id, project_id NULL, author_id, wilaya, commune, localite,
      geom POINT 4326, zone POLYGON NULL, date_visite, photo, status, validated_by, validated_at)
 hazard(id, site_id, type, details JSONB validé par schéma, photo)
 attachment(id, owner[site|hazard|project], file, kind, version)
+publication(id, objet, version, publié_le, publié_par, retiré_le)   -- vers le portail
 ref_wilaya / ref_commune (code, nom, geom) ; ref_faille ; ref_zone_rpa2024 ; ref_gypse
 audit_log(user, action, objet, avant, après, ip, date)
 ```
@@ -143,52 +186,65 @@ audit_log(user, action, objet, avant, après, ip, date)
 ## 3. Plan de développement par lots
 
 Chaque lot se termine par une démonstration et une recette sur ses critères d'acceptation.
-Les lots 1 et 2 peuvent avancer en parallèle après le Lot 0.
+Les lots 1 et 2 peuvent avancer en parallèle après le Lot 0. **Le portail client est le
+dernier lot.**
 
-### Lot 0 – Cadrage, accès et environnement (≈ 5 j/h)
-- Ateliers : valider la hiérarchie (antennes incluses), les rôles, la règle projet → entité,
-  les champs de l'aléa Inondation, les unités de mesure.
-- Obtenir : domaine AD, contrôleurs, certificat LDAPS, base DN de recherche des comptes LNHC,
-  compte de service en lecture (pour l'import) ; URL Odoo, version, base, compte technique en lecture, champs utilisés.
+### Phase 1 – Application principale : aléas géotechniques
+
+#### Lot 0 – Cadrage, accès et environnement (≈ 5 j/h)
+- Ateliers : valider la hiérarchie (antennes incluses) et sa correspondance avec les unités
+  opérationnelles Odoo, les rôles, les champs de l'aléa Inondation, les unités de mesure.
+- Obtenir : domaine AD, contrôleurs, certificat LDAPS, base DN de recherche des comptes,
+  compte de service en lecture (pour l'import) ; URL Odoo, version, base, liste des modules
+  *Operating Unit* installés, champ parent des unités opérationnelles, compte technique en
+  lecture sur toutes les unités opérationnelles.
 - Export de la base actuelle (formulaire Laravel) et des couches QGIS sources.
 - Environnements dev/recette/prod (Docker), CI (tests + lint), dépôt dédié **[à confirmer :
   ce dépôt contient aujourd'hui l'application de pointage ; MAKHATIR doit-il vivre dans un
   dépôt séparé ?]**.
-- **Livrables** : spécification validée, matrice des droits, accès techniques testés.
+- **Livrables** : spécification validée, matrice des droits, table de correspondance
+  entité ↔ unité opérationnelle ↔ OU AD, accès techniques testés.
 
-### Lot 1 – Socle sécurité : hiérarchie, utilisateurs, connexion AD, périmètre (≈ 13 j/h)
+#### Lot 1 – Socle sécurité : hiérarchie, utilisateurs, connexion AD, périmètre (≈ 13 j/h)
 - Gestion de la hiérarchie dans l'application : écran d'administration des entités
-  (création, renommage, déplacement, désactivation), chargement initial DG/DR/unités/antennes
-  depuis la liste officielle, correspondance facultative entité ↔ OU AD pour l'import.
+  (création, renommage, déplacement, désactivation) ; chargement initial à partir de la
+  table de correspondance du Lot 0. La liaison à l'unité opérationnelle est saisie ici et
+  contrôlée au Lot 2.
 - **Import des utilisateurs depuis l'AD** : recherche (nom, matricule, UPN) ou import en lot
-  d'une OU ; l'entité est proposée d'après l'OU du compte via la correspondance, puis
-  confirmée ou corrigée par l'administrateur ; rôle applicatif choisi à l'import ; liaison
-  par `objectGUID` ; rapport d'import (créés, ignorés, OU sans correspondance).
-- Après l'import, l'entité et le rôle se gèrent uniquement dans l'application ; aucune
-  synchronisation des OU, aucune mise à jour de l'entité à la connexion.
-- Connexion interne par bind LDAPS ; connexion client par mot de passe local.
-- Refus si : utilisateur absent ou inactif localement, compte AD désactivé/expiré/verrouillé.
+  d'une OU ; l'entité est proposée d'après l'OU du compte, puis confirmée ou corrigée par
+  l'administrateur ; rôle choisi à l'import ; liaison par `objectGUID` ; rapport d'import
+  (créés, ignorés, OU sans correspondance).
+- Après l'import, l'entité et le rôle se gèrent uniquement dans l'application.
+- Connexion par bind LDAPS ; refus si l'utilisateur est absent ou inactif localement, ou si
+  le compte AD est désactivé/expiré/verrouillé.
 - Filtrage « entité + descendants » appliqué par un mécanisme unique à toute l'API.
-- Rôles proposés : administrateur, validateur, agent de saisie, consultation (internes) ;
-  client étude, client aléas.
+- Rôles proposés : administrateur, validateur, agent de saisie, consultation.
 - Audit des connexions et des changements de droits ; HTTPS, cookies sécurisés.
 - **Critères d'acceptation** : un agent d'unité ne peut lire, par aucune URL, une donnée d'une
   unité voisine ou de sa DR (tests automatisés sur chaque point d'accès) ; un compte AD
   désactivé ne se connecte plus ; un compte AD valide mais absent de la base est refusé ;
   déplacer un compte d'OU dans l'AD ne change ni l'entité ni les droits de l'utilisateur.
 
-### Lot 2 – Intégration Odoo (≈ 8 j/h)
-- Connecteur Odoo (authentification, lecture paginée de `project.project` et `res.partner`).
-- Synchronisation incrémentale (`write_date`) planifiée + bouton « Actualiser », journal de
-  synchronisation, alerte en cas d'échec.
-- Rattachement projet → entité selon la règle retenue au Lot 0 ; projets non rattachés
-  visibles des seuls administrateurs pour correction.
+#### Lot 2 – Intégration Odoo : unités opérationnelles et projets (≈ 10 j/h)
+- Connecteur Odoo (authentification, lecture paginée de `operating.unit`, `project.project`,
+  `res.partner`).
+- Synchronisation des unités opérationnelles et **contrôle de cohérence des deux
+  hiérarchies** : unité opérationnelle sans entité, entité sans unité opérationnelle, liaison
+  en double, parent différent ; rapport d'écarts et alerte aux administrateurs. Assistant
+  pour créer une entité à partir d'une unité opérationnelle nouvelle.
+- Synchronisation incrémentale des projets (`write_date`) planifiée + bouton « Actualiser »,
+  journal de synchronisation, alerte en cas d'échec.
+- Entité du projet déduite de son `operating_unit_id` ; projets en anomalie (sans unité
+  opérationnelle ou unité non liée) visibles des seuls administrateurs.
 - Liste et recherche des projets filtrées par périmètre ; sélection d'un projet dans la fiche
   aléa.
-- **Critères** : un projet créé dans Odoo apparaît après la synchronisation suivante, dans le
-  seul périmètre de son entité ; une panne d'Odoo n'empêche pas la saisie.
+- **Critères** : un projet créé dans Odoo sur l'unité opérationnelle d'une antenne apparaît,
+  après la synchronisation suivante, pour cette antenne, son unité, sa DR et la DG, et pour
+  personne d'autre ; changer l'unité opérationnelle d'un projet dans Odoo déplace le projet
+  de périmètre ; une divergence de hiérarchie est détectée et signalée ; une panne d'Odoo
+  n'empêche pas la saisie.
 
-### Lot 3 – Référentiels et saisie des aléas (≈ 15 j/h)
+#### Lot 3 – Référentiels et saisie des aléas (≈ 15 j/h)
 - Import en PostGIS des 58 wilayas, des communes, des failles actives, du zonage RPA 2024 et
   des zones de gypse.
 - Formulaire refait : entité et matricule déduits du compte, wilaya → communes filtrées,
@@ -203,19 +259,21 @@ Les lots 1 et 2 peuvent avancer en parallèle après le Lot 0.
 - **Critères** : saisie complète d'un site multi-aléas sur mobile ; refus serveur des valeurs
   hors bornes ; aucun champ codé en dur côté client pour la hiérarchie.
 
-### Lot 4 – Validation et vérification des données (≈ 6 j/h)
+#### Lot 4 – Validation et vérification des données (≈ 6 j/h)
 - Statuts : brouillon → soumis → validé / rejeté (motif obligatoire) ; validation par un
   validateur de l'entité ou d'une entité parente.
 - Écran « Vérification des données » : file d'attente, filtres, historique des versions de la
   fiche, comparaison avant/après.
-- Seules les données validées sont publiées vers les espaces clients et les rapports.
+- Seules les données validées entrent dans les rapports et pourront être publiées vers le
+  portail client (Lot 17).
 - **Critères** : chaque changement de statut est tracé (qui, quand, avant/après).
 
-### Lot 5 – Carte interactive (≈ 12 j/h)
+#### Lot 5 – Carte interactive (≈ 12 j/h)
 - Carte OpenLayers : fonds OSM/satellite, couches de référence du Lot 3, gestionnaire de
   couches et légende.
 - Bibliothèque de symboles SVG par type d'aléa (et sous-type pour les mouvements de terrain),
-  symbole « aléas multiples », regroupement des points aux petites échelles.
+  symbole « aléas multiples », regroupement des points aux petites échelles. Composants
+  réutilisables par le portail client.
 - Fiche au clic : attributs, photos, projet, rapports associés selon les droits.
 - Recherche wilaya/commune/projet, filtres, mesure, géolocalisation, export de la vue.
 - Données servies filtrées par périmètre côté serveur (GeoJSON par emprise ou tuiles
@@ -223,7 +281,7 @@ Les lots 1 et 2 peuvent avancer en parallèle après le Lot 0.
 - **Critères** : la carte d'un agent n'affiche que les aléas de son périmètre ; fluide avec
   plusieurs milliers de points.
 
-### Lot 6 – Rapports et documents (≈ 10 j/h)
+#### Lot 6 – Rapports et documents (≈ 10 j/h)
 - Rapport des aléas (PDF) par zone (wilaya, commune, polygone dessiné) ou par projet : carte,
   tableau des aléas, contexte sismique et géologique, photos ; modèle LNHC.
 - Rattachement des rapports géotechniques existants à un aléa ou un projet, avec versions ;
@@ -231,64 +289,78 @@ Les lots 1 et 2 peuvent avancer en parallèle après le Lot 0.
 - Exports CSV/Excel et GeoJSON/Shapefile filtrés par périmètre.
 - **Critères** : un rapport généré ne contient aucune donnée hors du périmètre du demandeur.
 
-### Lot 7 – Espaces clients (≈ 10 j/h)
-- **Client Étude** : comptes liés au partenaire Odoo ; liste de ses projets, avancement
-  (étape Odoo), données validées et rapport de son étude.
-- **Client Aléas** : consultation de la carte et du rapport des aléas de la zone qui lui est
-  attribuée.
-- Création des comptes par un agent interne, invitation par e-mail, réinitialisation du mot de
-  passe, MFA optionnelle.
-- **Critères** : tests d'isolement entre deux clients ; aucune donnée non validée exposée.
-
-### Lot 8 – Reprise de l'existant et mise en production (≈ 8 j/h)
+#### Lot 7 – Reprise de l'existant et mise en production interne (≈ 8 j/h)
 - Migration des aléas et photos de l'application actuelle (conversion des coordonnées,
-  correspondance des codes DRS/unité/antenne avec les entités, contrôle des doublons) avec rapport
-  de reprise.
-- Reverse proxy TLS, sauvegardes automatiques base + fichiers avec test de restauration,
-  supervision (Zabbix déjà en place), journalisation centralisée.
+  correspondance des codes DRS/unité/antenne avec les entités, contrôle des doublons) avec
+  rapport de reprise.
+- Déploiement sur le réseau interne, reverse proxy TLS, sauvegardes automatiques base +
+  fichiers avec test de restauration, supervision (Zabbix déjà en place), journalisation
+  centralisée.
 - Guides utilisateur et administrateur, formation des référents par DR.
 - **Critères** : restauration complète testée ; 100 % des fiches reprises ou listées en
   anomalie.
 
-**Total Phase 1 (lots 0 à 8) : ≈ 87 j/h.**
+**Total Phase 1 (lots 0 à 7) : ≈ 79 j/h.**
 
-### Phase 2 – Enrichissement de la base géotechnique (lots 9 à 11, ≈ 45 j/h)
-- **Lot 9** – Sondages et lithologie : sondages géoréférencés liés aux projets, logs
+### Phase 2 – Enrichissement de la base géotechnique (lots 8 à 10, ≈ 45 j/h)
+- **Lot 8** – Sondages et lithologie : sondages géoréférencés liés aux projets, logs
   lithologiques, affichage du log, contexte géologique/hydrogéologique de la zone.
-- **Lot 10** – Essais in situ (SPT, pressiomètre, CPT, PDL, piézomètre, géophysique :
+- **Lot 9** – Essais in situ (SPT, pressiomètre, CPT, PDL, piézomètre, géophysique :
   sismique, imagerie électrique, Down-Hole) et essais de laboratoire (identification,
   chimie, mécanique) : saisie, import Excel normalisé, contrôles de cohérence.
-- **Lot 11** – Suivi d'avancement des études (étapes synchronisées avec Odoo), centralisation
+- **Lot 10** – Suivi d'avancement des études (étapes synchronisées avec Odoo), centralisation
   des documents techniques par projet.
 
-### Phase 3 – Calculs et rapport géotechnique (lots 12 à 14, ≈ 60 j/h)
-- **Lot 12** – Évaluations : potentiel de gonflement, de gypse, de liquéfaction (méthodes
+### Phase 3 – Calculs et rapport géotechnique (lots 11 à 13, ≈ 60 j/h)
+- **Lot 11** – Évaluations : potentiel de gonflement, de gypse, de liquéfaction (méthodes
   et normes de référence à fournir par le LNHC).
-- **Lot 13** – Fondations : capacité portante, tassements, stabilité ; notes de calcul
+- **Lot 12** – Fondations : capacité portante, tassements, stabilité ; notes de calcul
   traçables (entrées, méthode, version).
-- **Lot 14** – Rapport géotechnique final au modèle officiel LNHC : assemblage, conclusions
+- **Lot 13** – Rapport géotechnique final au modèle officiel LNHC : assemblage, conclusions
   et recommandations, circuit de contrôle/validation par ingénieur habilité, versions.
 
-### Chatbot géotechnique (lots 15 à 17, ≈ 45 j/h, après le Lot 6)
-- **Lot 15** – Base documentaire : import PDF/DOCX/XLSX/PPTX, métadonnées (titre, référence,
+### Chatbot géotechnique – agents internes (lots 14 à 16, ≈ 45 j/h, possible dès le Lot 6)
+- **Lot 14** – Base documentaire : import PDF/DOCX/XLSX/PPTX, métadonnées (titre, référence,
   organisme, date, version), statut en vigueur/remplacé/interne, activation, deux bases
   (normative et LNHC), droits par document.
-- **Lot 16** – Traitement : extraction de texte, OCR des documents numérisés, découpage par
+- **Lot 15** – Traitement : extraction de texte, OCR des documents numérisés, découpage par
   titre/article/tableau, indexation vectorielle (pgvector) et plein texte.
-- **Lot 17** – Assistant RAG : réponses citant document, article et page ; filtrage des
-  documents et données **par le périmètre de l'utilisateur avant la recherche** ; distinction
-  norme / recommandation / donnée plateforme / proposition IA ; signalement d'absence de
-  source ; journal des questions et sources ; interface intégrée, français et arabe.
+- **Lot 16** – Assistant RAG pour les agents : réponses citant document, article et page ;
+  filtrage des documents et données **par le périmètre de l'utilisateur avant la
+  recherche** ; distinction norme / recommandation / donnée plateforme / proposition IA ;
+  signalement d'absence de source ; journal des questions et sources ; français et arabe.
   **[à confirmer : modèle d'IA hébergé ou sur site, selon les contraintes de confidentialité.]**
+
+### Lot 17 – Portail client séparé (dernier lot, ≈ 20 j/h)
+- Application et base distinctes, déployées en DMZ, avec leur propre reverse proxy TLS,
+  sauvegardes et supervision.
+- **Publication à sens unique** depuis l'application principale : sélection par un agent des
+  éléments validés à publier (fiches d'aléas, rapports, avancement de projet), versionnage,
+  retrait d'une publication ; journal des publications.
+- Comptes clients du portail : invitation depuis l'application principale, activation par
+  e-mail, réinitialisation du mot de passe, MFA ; aucun lien avec l'AD.
+- **Espace Client Étude** : comptes rattachés au partenaire Odoo ; projets, avancement,
+  données et rapport publiés.
+- **Espace Client Aléas** : carte (composants du Lot 5) et rapport des aléas de la zone
+  attribuée.
+- Chatbot client (si retenu) : limité aux seules données publiées et aux documents
+  autorisés pour les clients, sans accès à la base documentaire interne.
+- **Critères** : le portail n'a aucun accès réseau ni identifiant vers la base interne ;
+  tests d'isolement entre deux clients ; aucune donnée non validée ou non publiée exposée ;
+  un retrait de publication disparaît du portail au cycle suivant ; test d'intrusion avant
+  ouverture.
 
 ---
 
 ## 4. Décisions à obtenir avant le démarrage
 
-1. Liste officielle des entités (DG, DR, unités, antennes) et de leurs codes ; correspondance
-   de chaque entité avec son OU AD pour l'import.
-2. Règle de rattachement d'un projet Odoo à une entité ; version d'Odoo et mode d'accès API.
-3. Rôles et matrice des droits (qui valide, qui crée les comptes clients).
+1. Liste officielle des entités (DG, DR, unités, antennes), leurs codes, l'unité
+   opérationnelle Odoo et l'OU AD de chacune.
+2. Odoo : version, modules *Operating Unit* installés, champ portant le parent des unités
+   opérationnelles, mode d'accès API.
+3. Rôles et matrice des droits (qui valide, qui publie vers le portail, qui invite les clients).
 4. Champs de l'aléa Inondation ; unités chlorures/sulfates ; listes de valeurs définitives.
-5. Hébergement (sur site ou cloud), nom de domaine et certificat TLS.
-6. Dépôt de code : séparé de l'application de pointage ou non.
+5. Hébergement de l'application principale (interne) et du portail (DMZ ou cloud), noms de
+   domaine et certificats TLS.
+6. Dépôt de code : séparé de l'application de pointage ou non ; un dépôt distinct pour le
+   portail.
